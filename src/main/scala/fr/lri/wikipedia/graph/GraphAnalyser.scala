@@ -236,27 +236,27 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     writeAvro( result.toDF(), outputPath )
 
   }
-
-  def executeInternalLinkAnalysis( dumpDir:String , step: Int, article: WikiPage, lang: String* ) = {
-
-    val pages = getCrossPages(dumpDir, lang: _*).persist()
-    val links = gb.getPageLinks(dumpDir, false, lang: _* ).persist()
-
-    var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
-    val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
-    val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
-
-
-    //val ranked = homologousRDD.union(candidatesRDD)
-    //val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
-
-    originalGraph = originalGraph.joinVertices( ranked )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, o.egoNet, u ) )
-    val result = originalGraph.vertices.map{ case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
-
-    val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
-    writeAvro( result.toDF(), outputPath )
-
-  }
+//
+//  def executeInternalLinkAnalysis( dumpDir:String , step: Int, article: WikiPage, lang: String* ) = {
+//
+//    val pages = getCrossPages(dumpDir, lang: _*).persist()
+//    val links = gb.getPageLinks(dumpDir, false, lang: _* ).persist()
+//
+//    var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
+//    val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
+//    val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
+//
+//
+//    //val ranked = homologousRDD.union(candidatesRDD)
+//    //val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
+//
+//    originalGraph = originalGraph.joinVertices( ranked )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, o.egoNet, u ) )
+//    val result = originalGraph.vertices.map{ case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+//
+//    val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
+//    writeAvro( result.toDF(), outputPath )
+//
+//  }
 
   def getCandidates(homologousRDD: VertexRDD[WikiPage]): RDD[(VertexId, WikiPage)] = {
     val stepNeighborhoodUnionRDD = getStepNeighborhoodUnion(homologousRDD)
