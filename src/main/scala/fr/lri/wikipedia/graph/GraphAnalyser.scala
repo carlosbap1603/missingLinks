@@ -195,18 +195,18 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
   }
 
-  def rankCandidates(originalGraph:Graph[WikiPage,Link], homologousRDD: RDD[(VertexId, WikiPage)], candidatesRDD: RDD[(VertexId, WikiPage)] ): RDD[(VertexId, WikiPage)] ={
+  def rankCandidates(originalGraph:Graph[WikiPage,Link], homologousRDD: Dataset[WikiPage], candidatesRDD: Dataset[WikiPage] ): RDD[(VertexId, WikiPage)] ={
     val all = homologousRDD.union(candidatesRDD)
 
     //Obtain the characteristic vector of each of the homologous and candidates
     var vectors = Seq[(Long,Map[Long,Double])]()
-    all.collect.foreach{ case(id,a) =>
+    all.collect.foreach{ a =>
       vectors = vectors :+ (a.sid, getMapVector(originalGraph, a.stepNet.getOrElse(a.lang, Set()) ) )
     }
 
     val vectorsRDD = vectors.toDF("sid","vector")
 
-    val articlePairs = homologousRDD.flatMap{ case(id,h) =>
+    val articlePairs = homologousRDD.flatMap{ h =>
       var candidateSet =  Seq[(Long,Long)]()
 
       h.candidates.keySet.foreach{ c =>
@@ -223,26 +223,24 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         "to" ).select("from","fromVector","to","toVector").as[JaccardVector]
 
     val jaccard = vectorPairs.map{ j =>  j.from -> Map( j.to.toString -> getJaccard( j.fromVector, j.toVector ) ) }.rdd
-    jaccard.reduceByKey( (a, b) => a++b )
+    val reduced = jaccard.reduceByKey( (a, b) => a++b ).toDF("sid", "ranked")
 
-    val result = all.join(jaccard).map{ case(id, (p,candidatesRanked)) => (id, WikiPage(p.sid, p.id, p.title, p.lang, p.crossNet, p.stepNet, p.egoNet, candidatesRanked, p.step) ) }
+    val result = all.join(reduced, "sid" )
+      .select("sid","id","title","lang","crossNet","stepNet","egoNet","ranked", "step").withColumnRenamed("ranked", "candidates").as[WikiPage]
 
-    result.toDF().show(false)
-
-    result
+    result.map{ x => (x.sid, x) }.rdd
 
   }
 
   def executeInternalLinkAnalysis( dumpDir:String , titleSearch: String , step: Int, lang: String* ) = {
 
-    val pages = getCrossPages(dumpDir, lang: _*)
+    val pages = getCrossPages(dumpDir, lang: _*).persist()
 
     val search = pages.filter( 'title === titleSearch )
 
     if (search.count() > 0) {
 
       val article = search.first()
-
       val links = gb.getPageLinks(dumpDir, false, lang: _*).persist()
 
       var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString)
@@ -258,7 +256,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
   def executeCandidateAnalysis( dumpDir:String , titleSearch: String, step: Int, lang: String* ) = {
 
-      val pages = getCrossPages(dumpDir, lang: _*)
+      val pages = getCrossPages(dumpDir, lang: _*).persist()
 
       val search = pages.filter( 'title === titleSearch )
 
@@ -281,29 +279,37 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       }
   }
 
+  def executeRankAnalysis(dumpDir:String , titleSearch: String, step: Int, lang: String*  ) = {
+
+    val pages = getCrossPages(dumpDir, lang: _*).persist()
 
 
-//
-//  def executeInternalLinkAnalysis( dumpDir:String , step: Int, article: WikiPage, lang: String* ) = {
-//
-//    val pages = getCrossPages(dumpDir, lang: _*).persist()
-//    val links = gb.getPageLinks(dumpDir, false, lang: _* ).persist()
-//
-//    var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
-//    val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
-//    val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
-//
-//
-//    //val ranked = homologousRDD.union(candidatesRDD)
-//    //val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
-//
-//    originalGraph = originalGraph.joinVertices( ranked )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, o.egoNet, u ) )
-//    val result = originalGraph.vertices.map{ case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
-//
-//    val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
-//    writeAvro( result.toDF(), outputPath )
-//
-//  }
+    val search = pages.filter( 'title === titleSearch )
+
+    if (search.count() > 0) {
+
+      val article = search.first()
+
+      val links = gb.getPageLinks(dumpDir, false, lang: _*).persist()
+      var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString)
+
+      //get Homologous Nodes
+      val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
+      val homologousRDD = pages.filter( h =>  homologousIDs.contains( h.sid ) )
+
+      //get All the candidates of all the homologous nodes
+      val onlyCandidates = homologousRDD.map{ page => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
+      val candidatesRDD = pages.filter( h =>  onlyCandidates.contains( h.sid ) )
+
+      val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
+
+      originalGraph = originalGraph.joinVertices(ranked)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates))
+      val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+
+      val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
+      writeAvro(result.toDF(), outputPath)
+    }
+  }
 
   def getCandidates(homologousRDD: VertexRDD[WikiPage]): RDD[(VertexId, WikiPage)] = {
     val stepNeighborhoodUnionRDD = getStepNeighborhoodUnion(homologousRDD)

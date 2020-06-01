@@ -15,13 +15,13 @@ class GraphCandidateNetConf(args:Seq[String]) extends ScallopConf(args) with Ser
 object GraphCandidateNet {
 
   val sconf = new SparkConf().setAppName("Wikipedia: candidate analysis")
-  //                              .setMaster("local[*]")
+                                .setMaster("local[*]")
   val session = SparkSession.builder.config(sconf).getOrCreate()
   val ga = new GraphAnalyser(session)
 
   def main(args:Array[String]): Unit = {
 
-    val conf = new GraphCandidateNetConf(args)
+    val conf = new GraphRankNetConf(args)
     val dumpDir = conf.dumpPath()
     val titleSearch =  conf.titleSearch()
     val step = conf.step().toInt
