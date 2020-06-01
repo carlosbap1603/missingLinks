@@ -163,46 +163,41 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       mergeMsg = mergeMessage)
   }
 
-  def executeInternalLinkAnalysis( dumpDir:String , step: Int, article: WikiPage, lang: String* ) = {
-
-    val pages = getCrossPages(dumpDir, lang: _*).persist()
-    val links = gb.getPageLinks(dumpDir, false, lang: _* ).persist()
-
-    var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
+  def getHomologousNeighborhood( dumpDir:String , step: Int, article: WikiPage, lang: String*  ): RDD[(VertexId, WikiPage)] ={
 
     //get Homologous Nodes
     val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
 
     //get the internal neighborhood of the homologous nodes
-    var graph = getInternalNet(pages, links, step, homologousIDs)
+    val graph = getInternalNet( dumpDir, step, homologousIDs, lang: _*)
     val homologousRDD = graph.vertices.filter(v => homologousIDs.contains(v._1))
 
     //obtain the candidates of the homologous nodes
-    val homologousWithCandidatesRDD = getCandidates(homologousRDD)
+    getCandidates(homologousRDD)
+  }
 
-    //Join the candidates of the homologous nodes with the original graph
-    originalGraph = originalGraph.joinVertices( homologousWithCandidatesRDD )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.candidates, step ) )
+  def getCandidatesNeighborhood(  dumpDir:String , step: Int, homologousRDD: RDD[(VertexId,WikiPage)], lang: String*   ): RDD[(VertexId, WikiPage)] ={
 
     //get All the candidates of all the homologous nodes
-    val allCandidates = homologousWithCandidatesRDD.map{ case (id, page) => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
+    val onlyCandidates = homologousRDD.map{ case (id, page) => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
 
     //obtain the internal neighborhoods of the candidates
-    graph = getInternalNet(pages, links, step, allCandidates)
-    val candidatesRDD = graph.vertices.filter(v => allCandidates.contains(v._1))
+    val graph = getInternalNet( dumpDir, step, onlyCandidates, lang:_*)
+    graph.vertices.filter(v => onlyCandidates.contains(v._1))
 
-    //Join the internal neighborhoods of the candidates nodes with the original graph
-    originalGraph = originalGraph.joinVertices( candidatesRDD )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet ) )
+  }
 
-    val all = homologousIDs ++ allCandidates
+  def rankCandidates(originalGraph:Graph[WikiPage,Link], homologousRDD: RDD[(VertexId, WikiPage)], candidatesRDD: RDD[(VertexId, WikiPage)] ) ={
+    val all = homologousRDD.union(candidatesRDD)
+
     //Obtain the characteristic vector of each of the homologous and candidates
     var vectors = Seq[(Long,Map[Long,Double])]()
-    originalGraph.vertices.filter{ case(id, v) => all.contains(v.sid) }
-                          .collect.foreach{ case(id,a) =>
-                              vectors = vectors :+ (a.sid, getMapVector(originalGraph, a.stepNet.getOrElse(a.lang, Set()) ) )
-                          }
+    all.collect.foreach{ case(id,a) =>
+      vectors = vectors :+ (a.sid, getMapVector(originalGraph, a.stepNet.getOrElse(a.lang, Set()) ) )
+    }
     val vectorsRDD = vectors.toDF("sid","vector")
 
-    val articlePairs = originalGraph.vertices.filter{ case(id,v) => homologousIDs.contains(v.sid) }.flatMap{ case(id,h) =>
+    val articlePairs = homologousRDD.flatMap{ case(id,h) =>
       var candidateSet =  Seq[(Long,Long)]()
 
       h.candidates.keySet.foreach{ c =>
@@ -210,7 +205,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       }
       candidateSet.iterator
     }.toDF("from", "to")
-
 
     val vectorPairs = articlePairs.join( vectorsRDD.withColumnRenamed("sid", "from")
       .withColumnRenamed("vector","fromVector"),
@@ -220,10 +214,21 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         "to" ).select("from","fromVector","to","toVector").as[JaccardVector]
 
     val jaccard = vectorPairs.map{ j =>  j.from -> Map( j.to.toString -> getJaccard( j.fromVector, j.toVector ) ) }.rdd
-    val reduced = jaccard.reduceByKey( (a, b) => a++b )
+    jaccard.reduceByKey( (a, b) => a++b )
+  }
 
-    originalGraph = originalGraph.joinVertices( reduced )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, u ) )
+  def executeInternalLinkAnalysis( dumpDir:String , step: Int, article: WikiPage, lang: String* ) = {
 
+    val pages = getCrossPages(dumpDir, lang: _*).persist()
+    val links = gb.getPageLinks(dumpDir, false, lang: _* ).persist()
+
+    var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
+    val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
+    val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
+
+    val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
+
+    originalGraph = originalGraph.joinVertices( ranked )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, u ) )
     val result = originalGraph.vertices.map{ case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
     val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
@@ -231,7 +236,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
   }
 
-  def getCandidates(homologousRDD: VertexRDD[WikiPage]) = {
+  def getCandidates(homologousRDD: VertexRDD[WikiPage]): RDD[(VertexId, WikiPage)] = {
     val stepNeighborhoodUnionRDD = getStepNeighborhoodUnion(homologousRDD)
 
     homologousRDD.join( stepNeighborhoodUnionRDD ).map {
@@ -311,7 +316,10 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     }
   }
 
-  def getInternalNet(pages: Dataset[WikiPage], links: Dataset[WikiLink], steps: Int, ego: Set[Long]): Graph[WikiPage, Link] = {
+  def getInternalNet(dumpDir: String, steps: Int, ego: Set[Long], lang: String *): Graph[WikiPage, Link] = {
+
+    val pages = getCrossPages(dumpDir, lang: _*)
+    val links = gb.getPageLinks(dumpDir, false, lang: _* )
 
     val internalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
 
