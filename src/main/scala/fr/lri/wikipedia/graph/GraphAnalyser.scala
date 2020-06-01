@@ -77,18 +77,18 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
     var anomalies:Dataset[WikiPage] = null
 
-    try {
-
-      anomalies = session.read.format("avro").load(anomalyPath).as[WikiPage]
-
-    } catch {
-      case e: AnalysisException => {
+//    try {
+//
+//      anomalies = session.read.format("avro").load(anomalyPath).as[WikiPage]
+//
+//    } catch {
+//      case e: AnalysisException => {
 
         executeCrossLinkAnalysis(dumpDir, lang: _*)
         anomalies = session.read.format("avro").load(anomalyPath).as[WikiPage]
 
-      }
-    }
+//      }
+//    }
 
     val expandAnomalies = anomalies.flatMap{ p =>
       var error = Seq[(Long,String,String,Long)]()
