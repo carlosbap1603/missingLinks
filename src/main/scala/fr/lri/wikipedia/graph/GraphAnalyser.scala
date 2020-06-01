@@ -195,6 +195,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     all.collect.foreach{ case(id,a) =>
       vectors = vectors :+ (a.sid, getMapVector(originalGraph, a.stepNet.getOrElse(a.lang, Set()) ) )
     }
+
     val vectorsRDD = vectors.toDF("sid","vector")
 
     val articlePairs = homologousRDD.flatMap{ case(id,h) =>
@@ -226,6 +227,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
     val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
 
+    //val ranked = homologousRDD.union(candidatesRDD)
     val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
 
     originalGraph = originalGraph.joinVertices( ranked )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, u ) )
