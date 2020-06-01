@@ -225,11 +225,11 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
     var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
     val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
-    val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
+    //val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
 
-    val all = homologousRDD.union(candidatesRDD)
+    //val all = homologousRDD.union(candidatesRDD)
 
-    originalGraph = originalGraph.joinVertices( all )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates ) )
+    originalGraph = originalGraph.joinVertices( homologousRDD )( (id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates ) )
     val result = originalGraph.vertices.map{ case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
     val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
