@@ -225,7 +225,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
     var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
     val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
-    //val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
+    val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, homologousRDD, lang: _* )
 
     //val all = homologousRDD.union(candidatesRDD)
 
