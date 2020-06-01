@@ -179,7 +179,9 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
   def getCandidatesNeighborhood(  dumpDir:String , step: Int, homologousRDD: RDD[(VertexId,WikiPage)], lang: String*   ): RDD[(VertexId, WikiPage)] ={
 
     //get All the candidates of all the homologous nodes
-    val onlyCandidates = homologousRDD.map{ case (id, page) => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
+    var onlyCandidates = homologousRDD.map{ case (id, page) => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
+
+    onlyCandidates = onlyCandidates.take(10)
 
     //obtain the internal neighborhoods of the candidates
     val graph = getInternalNet( dumpDir, step, onlyCandidates, lang:_*)
