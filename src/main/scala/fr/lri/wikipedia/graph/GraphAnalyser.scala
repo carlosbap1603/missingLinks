@@ -187,7 +187,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     //get All the candidates of all the homologous nodes
     var onlyCandidates = homologousRDD.map{ page => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
 
-    onlyCandidates = onlyCandidates.take(10)
+    onlyCandidates = onlyCandidates.take(15)
 
     //obtain the internal neighborhoods of the candidates
     val graph = getInternalNet( dumpDir, step, onlyCandidates, lang:_*)
@@ -268,8 +268,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString)
 
         val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, article, lang: _*)
-
-        //val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
 
         originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates))
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
