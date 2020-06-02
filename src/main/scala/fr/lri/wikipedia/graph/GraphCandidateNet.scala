@@ -15,7 +15,7 @@ class GraphCandidateNetConf(args:Seq[String]) extends ScallopConf(args) with Ser
 object GraphCandidateNet {
 
   val sconf = new SparkConf().setAppName("Wikipedia: candidate analysis")
-                                .setMaster("local[*]")
+//                                .setMaster("local[*]")
   val session = SparkSession.builder.config(sconf).getOrCreate()
   val ga = new GraphAnalyser(session)
 

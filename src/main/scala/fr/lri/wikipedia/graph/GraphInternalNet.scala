@@ -15,7 +15,7 @@ class GraphInternalNetConf(args:Seq[String]) extends ScallopConf(args) with Seri
 
 object GraphInternalNet extends AvroWriter{
   val sconf = new SparkConf().setAppName("Wikipedia graph candidates")
-                              .setMaster("local[*]")
+//                              .setMaster("local[*]")
   val session = SparkSession.builder.config(sconf).getOrCreate()
   val ga = new GraphAnalyser(session)
 

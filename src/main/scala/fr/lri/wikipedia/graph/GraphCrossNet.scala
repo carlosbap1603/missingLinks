@@ -13,7 +13,7 @@ class GraphCrossNetConf(args:Seq[String]) extends ScallopConf(args) with Seriali
 object GraphCrossNet {
 
   val sconf = new SparkConf().setAppName("Wikipedia: crosslink analysis")
-                              .setMaster("local[*]")
+//                              .setMaster("local[*]")
   val session = SparkSession.builder.config(sconf).getOrCreate()
   val ga = new GraphAnalyser(session)
 

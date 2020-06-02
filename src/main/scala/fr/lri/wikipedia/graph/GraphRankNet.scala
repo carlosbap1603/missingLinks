@@ -15,7 +15,7 @@ class GraphRankNetConf(args:Seq[String]) extends ScallopConf(args) with Serializ
 object GraphRankNet {
 
   val sconf = new SparkConf().setAppName("Wikipedia: candidate analysis")
-    .setMaster("local[*]")
+//                              .setMaster("local[*]")
   val session = SparkSession.builder.config(sconf).getOrCreate()
   val ga = new GraphAnalyser(session)
 
