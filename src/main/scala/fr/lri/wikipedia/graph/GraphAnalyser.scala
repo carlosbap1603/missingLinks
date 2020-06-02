@@ -187,7 +187,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     //get All the candidates of all the homologous nodes
     var onlyCandidates = homologousRDD.map{ page => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
 
-    onlyCandidates = onlyCandidates.take(15)
+    //onlyCandidates = onlyCandidates.take(15)
 
     //obtain the internal neighborhoods of the candidates
     val graph = getInternalNet( dumpDir, step, onlyCandidates, lang:_*)
