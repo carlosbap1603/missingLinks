@@ -176,25 +176,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     getCandidates(homologousRDD)
   }
 
-  def getCandidatesNeighborhood(  dumpDir:String , step: Int, article: WikiPage, lang: String*   ): RDD[(VertexId, WikiPage)] ={
-
-    //get Homologous Nodes
-    val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
-    val pages = getCrossPages(dumpDir, lang: _*)
-    val homologousRDD = pages.filter( h => homologousIDs.contains( h.sid ) )
-
-
-    //get All the candidates of all the homologous nodes
-    var onlyCandidates = homologousRDD.map{ page => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
-
-    onlyCandidates = onlyCandidates.take(10)
-
-    //obtain the internal neighborhoods of the candidates
-    val graph = getInternalNet( dumpDir, step, onlyCandidates, lang:_*)
-    graph.vertices.filter(v => onlyCandidates.contains(v._1))
-
-  }
-
   def rankCandidates(originalGraph:Graph[WikiPage,Link], homologousRDD: Dataset[WikiPage], candidatesRDD: Dataset[WikiPage] ): RDD[(VertexId, WikiPage)] ={
     val all = homologousRDD.union(candidatesRDD)
 
@@ -267,9 +248,25 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         val links = gb.getPageLinks(dumpDir, false, lang: _*).persist()
         var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString)
 
-        val candidatesRDD = getCandidatesNeighborhood(dumpDir, step, article, lang: _*)
 
-        originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates))
+        //get Homologous Nodes
+        val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
+        val homologousRDD = pages.filter(h => homologousIDs.contains(h.sid))
+
+
+        //get All the candidates of all the homologous nodes
+        var onlyCandidates = homologousRDD.map { page => page.candidates.keySet }.reduce((a, b) => a ++ b).map(_.toLong)
+
+        while (!onlyCandidates.isEmpty) {
+          val current = onlyCandidates.take(10)
+          onlyCandidates = onlyCandidates.drop(10)
+
+          //obtain the internal neighborhoods of the candidates
+          val graph = getInternalNet(dumpDir, step, current, lang: _*)
+          val candidatesRDD = graph.vertices.filter(v => onlyCandidates.contains(v._1))
+          originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates))
+        }
+
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
         val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
