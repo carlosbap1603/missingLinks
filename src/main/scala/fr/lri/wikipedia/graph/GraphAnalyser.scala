@@ -263,8 +263,9 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
           //obtain the internal neighborhoods of the candidates
           val graph = getInternalNet(dumpDir, step, current, lang: _*)
-          val candidatesRDD = graph.vertices.filter(v => onlyCandidates.contains(v._1))
+          val candidatesRDD = graph.vertices.filter(v => current.contains(v._1))
           originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates))
+
         }
 
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
