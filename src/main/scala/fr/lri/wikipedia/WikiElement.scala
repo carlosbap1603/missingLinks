@@ -29,7 +29,8 @@ case class WikiPage(sid:Long = -1,
                     stepNet: Map[String, Set[Long]] = Map(),
                     egoNet: Set[Long] = Set(),
                     candidates: Map[String, Double] = Map(),
-                    step: Int = 0
+                    step: Int = 0,
+                    ranked: Boolean = false
                    ) extends WikiElement
 
 case class WikiLink(from:Long, to:Long, fromLang:String, toLang:String ) extends WikiElement

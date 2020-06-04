@@ -27,7 +27,7 @@ object GraphCandidateNet {
     val step = conf.step().toInt
     val lang = conf.languages()
 
-    ga.executeCandidateAnalysis(dumpDir, titleSearch, step, lang: _*)
+    ga.executeInternalLinkAnalysis(dumpDir, titleSearch, step, lang: _*)
 
   }
 }

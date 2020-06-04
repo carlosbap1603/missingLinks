@@ -29,7 +29,5 @@ object GraphRankNet {
 
     ga.executeRankAnalysis(dumpDir, titleSearch, step, lang: _*)
 
-    ga.printCandidates(dumpDir, titleSearch, step, lang: _*)
-
   }
 }
