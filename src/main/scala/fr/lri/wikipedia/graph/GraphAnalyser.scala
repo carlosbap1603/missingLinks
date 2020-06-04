@@ -308,22 +308,21 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
           //obtain the internal neighborhoods of the candidates
           val graph = getInternalNet(dumpDir, step, current, lang: _*)
           val candidatesRDD = graph.vertices.filter(v => current.contains(v._1))
-          originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates, step ))
+          originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates, step))
 
         }
 
-        onlyCandidates = homologousRDD.map{ page => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
-        candidatesRDD = originalGraph.vertices.filter{ case(id,h) =>  onlyCandidates.contains( h.sid ) }.map{ case(id,h) => h }.toDF().as[WikiPage]
+        onlyCandidates = homologousRDD.map { page => page.candidates.keySet }.reduce((a, b) => a ++ b).map(_.toLong)
+        candidatesRDD = originalGraph.vertices.filter { case (id, h) => onlyCandidates.contains(h.sid) }.map { case (id, h) => h }.toDF().as[WikiPage]
 
+        val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
+
+        originalGraph = originalGraph.joinVertices(ranked)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, u.candidates, o.step, true))
+        val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+
+        val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
+        writeAvro(result.toDF(), outputPath)
       }
-
-      val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
-
-      originalGraph = originalGraph.joinVertices(ranked)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, u.candidates, o.step, true  ))
-      val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
-
-      val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
-      writeAvro(result.toDF(), outputPath)
     }
 
     printCandidates(dumpDir, titleSearch, true, lang: _*)
