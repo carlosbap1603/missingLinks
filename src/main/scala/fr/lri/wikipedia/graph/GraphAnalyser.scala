@@ -302,8 +302,9 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
       if( !article.ranked ) {
         while (!onlyCandidates.isEmpty) {
-          val current = onlyCandidates.take(10)
-          onlyCandidates = onlyCandidates.drop(10)
+          val block = 5
+          val current = onlyCandidates.take(block)
+          onlyCandidates = onlyCandidates.drop(block)
 
           //obtain the internal neighborhoods of the candidates
           val graph = getInternalNet(dumpDir, step, current, lang: _*)
