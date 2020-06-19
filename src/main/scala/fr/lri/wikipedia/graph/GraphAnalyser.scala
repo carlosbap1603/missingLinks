@@ -302,7 +302,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
       if( !article.ranked ) {
         while (!onlyCandidates.isEmpty) {
-          val block = 5
+          val block = 3
           val current = onlyCandidates.take(block)
           onlyCandidates = onlyCandidates.drop(block)
 
