@@ -146,12 +146,12 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     }
 
     def mergeMessage(m1: Neighborhood, m2: Neighborhood) = {
-      val vMap = mergeMaps(m1.net, m2.net)
+      val vMap = mergeMaps(m1.kNet, m2.kNet)
       Neighborhood(vMap)
     }
 
     def vertexProgram(vertexId: VertexId, vInfo: WikiPage, message: Neighborhood) = {
-      WikiPage(vInfo.sid, vInfo.id, vInfo.title, vInfo.lang, message.net)
+      WikiPage(vInfo.sid, vInfo.id, vInfo.title, vInfo.lang, message.kNet)
     }
 
     val initialMessage = Neighborhood()
@@ -443,12 +443,12 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     }
 
     def mergeMessage(m1: Neighborhood, m2: Neighborhood) = {
-      val vMap = mergeMaps(m1.net, m2.net)
-      Neighborhood(vMap, m1.set ++ m2.set )
+      val vMap = mergeMaps(m1.kNet, m2.kNet)
+      Neighborhood(vMap, m1.oneNet ++ m2.oneNet )
     }
 
     def vertexProgram(vertexId: VertexId, vInfo: WikiPage, message: Neighborhood) = {
-      WikiPage(vInfo.sid, vInfo.id, vInfo.title, vInfo.lang, vInfo.crossNet, message.net, message.set)
+      WikiPage(vInfo.sid, vInfo.id, vInfo.title, vInfo.lang, vInfo.crossNet, message.kNet, message.oneNet)
     }
 
     val initialMessage = Neighborhood()
@@ -464,10 +464,10 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     val map = if( !neighborhood.isEmpty ) {
 
       val neighborhoodGraph = originalGraph.subgraph(vpred = (id, attr) => neighborhood.contains(id))
-      val pRankGraph = neighborhoodGraph.pageRank(0.001)
+      val pRankGraph = neighborhoodGraph.pageRank(0.01)
 
       pRankGraph.vertices.map { case (id, rank) =>
-        Map(id -> rank)
+        Map(id -> (1/rank) )
       }.reduce((a, b) => a ++ b)
     }else{ Map[Long,Double]() }
 

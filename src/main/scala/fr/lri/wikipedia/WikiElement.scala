@@ -15,7 +15,7 @@ abstract class WikiElement extends Serializable
 //==================== Classes for graph usage ===========================
 
 case class Link( wType: String, fromLang: String, toLang: String )
-case class Neighborhood(net: Map[String, Set[Long]] = Map(),set: Set[Long] = Set() ) extends WikiElement
+case class Neighborhood(kNet: Map[String, Set[Long]] = Map(), oneNet: Set[Long] = Set() ) extends WikiElement
 case class JaccardPair(from:Long, to:Long, coefficient:Double ) extends WikiElement
 case class JaccardVector(from:Long, fromVector:Map[Long,Double], to:Long, toVector:Map[Long,Double] ) extends WikiElement
 
