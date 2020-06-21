@@ -3,7 +3,7 @@ package fr.lri.wikipedia.graph
 import java.nio.file.Paths
 
 import breeze.linalg.{DenseVector, norm}
-import fr.lri.wikipedia.{AvroWriter, ElementType, JaccardVector, Link, Neighborhood, WikiLink, WikiPage}
+import fr.lri.wikipedia.{AvroWriter, EgoNet, ElementType, JaccardVector, LangEgoNet, Link, Neighborhood, WikiLink, WikiPage}
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{AnalysisException, Dataset, SparkSession}
@@ -162,19 +162,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       mergeMsg = mergeMessage)
   }
 
-  def getHomologousNeighborhood( dumpDir:String , step: Int, article: WikiPage, lang: String*  ): RDD[(VertexId, WikiPage)] ={
-
-    //get Homologous Nodes
-    val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
-
-    //get the internal neighborhood of the homologous nodes
-    val graph = getInternalNet( dumpDir, step, homologousIDs, lang: _*)
-    val homologousRDD = graph.vertices.filter(v => homologousIDs.contains(v._1))
-
-    //obtain the candidates of the homologous nodes
-    getCandidates(homologousRDD)
-  }
-
   def rankCandidates(originalGraph:Graph[WikiPage,Link], homologousRDD: Dataset[WikiPage], candidatesRDD: Dataset[WikiPage] ): RDD[(VertexId, WikiPage)] ={
     val all = homologousRDD.union(candidatesRDD)
 
@@ -215,7 +202,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
   def executeInternalLinkAnalysis( dumpDir:String , titleSearch: String , step: Int, lang: String* ) = {
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
-
     val search = pages.filter( 'title === titleSearch )
 
     if (search.count() > 0) {
@@ -225,10 +211,11 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       if( article.candidates.isEmpty || article.step < step ) {
 
         val links = gb.getPageLinks(dumpDir, false, lang: _*).persist()
-        var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString)
-        val homologousRDD = getHomologousNeighborhood(dumpDir, step, article, lang: _*)
+        var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString).persist()
 
-        originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates, step ))
+        val homologousRDD = getInternalNet(dumpDir, article, step, lang:_* )
+
+        originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.candidates, step ))
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
         val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
@@ -290,7 +277,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     printCandidates(dumpDir, titleSearch, true, lang: _*)
   }
 
-  def getCandidates(homologousRDD: VertexRDD[WikiPage]): RDD[(VertexId, WikiPage)] = {
+  def getCandidates(homologousRDD: RDD[(Long,WikiPage)]): RDD[(VertexId, WikiPage)] = {
     val stepNeighborhoodUnionRDD = getStepNeighborhoodUnion(homologousRDD)
 
     homologousRDD.join( stepNeighborhoodUnionRDD ).map {
@@ -305,7 +292,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     }
   }
 
-  def getStepNeighborhoodUnion(neighborhood: VertexRDD[WikiPage]) = {
+  def getStepNeighborhoodUnion(neighborhood: RDD[(Long,WikiPage)]) = {
 
     val kStepRdd = neighborhood.flatMap { case (vid, vInfo) =>
       var info = Seq[(Long, Set[Long])]()
@@ -340,17 +327,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       val candidates = pages.filter( h => homologous.contains( h.sid ) )
                       .select('sid, explode('candidates))
                       .toDF("from", "to", "jaccard")
-
-//      val candidates = pages.filter( h => homologous.contains( h.sid ) ).flatMap { h =>
-//
-//        var info = Seq[(Long, Long, Double)]()
-//
-//        h.candidates.foreach{ c =>
-//          info = info :+ (h.sid, c._1.toLong, c._2 )
-//        }
-//
-//        info.iterator
-//      }.toDF("from", "to", "jaccard")
 
       val from = pages.withColumnRenamed("sid", "from")
       .withColumnRenamed("title","from_title")
@@ -453,6 +429,63 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     val relatedness = dotProduct / ( math.pow( norm( vector1 ),2 ) + math.pow( norm( vector2 ),2 ) - dotProduct )
 
     relatedness
+  }
+
+
+  def getInternalNet( dumpDir:String , article: WikiPage , step: Int, lang: String*  ): RDD[(VertexId, WikiPage)] ={
+
+    val pages = getCrossPages(dumpDir, lang: _*).persist()
+    val links = gb.getPageLinks(dumpDir, false, lang: _*)
+    val graph = gb.getValidGraph(pages, links, ElementType.PageLink.toString).persist()
+
+    //get Homologous Nodes
+    val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
+
+    //get the internal neighborhood of the homologous nodes
+    val stepNet = getKStepNeighborhood(graph, step, homologousIDs)
+
+    val langStepNet = getTranslatatedNeighborhood( pages, stepNet ).persist()
+    val egoNet = if(step == 1 ) stepNet else getKStepNeighborhood(graph, 1, homologousIDs).persist()
+
+    val homologous = pages.filter( p => homologousIDs.contains(p.sid) ).select('sid, 'id,'title,'lang,'crossNet,'candidates,'step,'ranked).persist()
+
+    val joinedNet = langStepNet.join(egoNet,"ego").withColumnRenamed("ego","sid").persist()
+
+    val homologousRDD = homologous.join(joinedNet,"sid").as[WikiPage].rdd.map( r => (r.sid, r) )
+
+    //obtain the candidates of the homologous node
+    getCandidates(homologousRDD)
+  }
+
+
+  def getKStepNeighborhood( originalGraph:Graph[WikiPage,Link] , step: Int, homologousIDs:Set[Long] ):Dataset[EgoNet] ={
+
+    //get the ego neighborhood of all the nodes
+    val egoNet = originalGraph.collectNeighborIds(EdgeDirection.In)
+    //filter the homologous
+    var previousLayer = egoNet.filter{ case (id,n) => homologousIDs.contains(id) }.toDF("ego","egoNet").as[EgoNet]
+    var count = 1
+
+    //expand the layers as needed by the step
+    while( count < step ) {
+      val explodedLayer = previousLayer.withColumnRenamed("egoNet", "to").select('ego, explode('to)).withColumnRenamed("col", "to")
+      val explodedNextLayer = explodedLayer.join(egoNet.toDF("to", "egoNet"), "to").select('ego, 'egoNet).as[EgoNet]
+      val homoNet = previousLayer.union(explodedNextLayer).map(n => (n.ego, n.egoNet)).rdd.reduceByKey((a, b) => a ++ b).toDF("ego", "egoNet").as[EgoNet]
+
+      count += 1
+      previousLayer = homoNet
+    }
+
+    previousLayer
+  }
+
+  def getTranslatatedNeighborhood(pages:Dataset[WikiPage], net: Dataset[EgoNet] ):Dataset[LangEgoNet]={
+
+    val crossNet = pages.select('sid,'crossNet)
+    val explodedNet = net.select('ego,explode('egoNet)).withColumnRenamed("col","sid")
+    val explodedTranslation = explodedNet.join(crossNet, "sid").withColumnRenamed("crossNet", "stepNet").select("ego","stepNet").as[LangEgoNet]
+    explodedTranslation.map( n => (n.ego, n.stepNet)).rdd.reduceByKey((a, b) => mergeMaps(a,b)).toDF("ego", "stepNet").as[LangEgoNet]
+
   }
 
 }
