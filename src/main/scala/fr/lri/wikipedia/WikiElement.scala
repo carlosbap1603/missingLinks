@@ -17,7 +17,7 @@ abstract class WikiElement extends Serializable
 case class Link( wType: String, fromLang: String, toLang: String )
 case class Neighborhood(kNet: Map[String, Set[Long]] = Map(), oneNet: Set[Long] = Set() ) extends WikiElement
 case class JaccardPair(from:Long, to:Long, coefficient:Double ) extends WikiElement
-case class JaccardVector(from:Long, fromVector:Map[Long,Double], to:Long, toVector:Map[Long,Double] ) extends WikiElement
+case class JaccardVector(from:Long, fromVector:Map[String,Double], to:Long, toVector:Map[String,Double] ) extends WikiElement
 case class EgoNet(ego:Long, egoNet:Set[Long]) extends WikiElement
 case class LangEgoNet(ego:Long, stepNet:Map[String, Set[Long]]) extends WikiElement
 
@@ -31,6 +31,7 @@ case class WikiPage(sid:Long = -1,
                     crossNet: Map[String, Set[Long]] = Map(),
                     stepNet: Map[String, Set[Long]] = Map(),
                     egoNet: Set[Long] = Set(),
+                    vector: Map[String, Double] = Map(),
                     candidates: Map[String, Double] = Map(),
                     step: Int = 0,
                     ranked: Boolean = false
