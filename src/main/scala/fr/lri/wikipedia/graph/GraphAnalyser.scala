@@ -213,7 +213,9 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         val links = gb.getPageLinks(dumpDir, false, lang: _*).persist()
         var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString).persist()
 
-        val homologousRDD = getInternalNet(dumpDir, article, step, lang:_* )
+        //get Homologous Nodes
+        val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
+        val homologousRDD = getInternalNet(dumpDir, step,homologousIDs, lang:_* )
 
         originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.candidates, step ))
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
@@ -245,27 +247,18 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
       //get All the candidates of all the homologous nodes
       val onlyCandidates = homologousRDD.map{ page => page.candidates.keySet }.reduce((a, b) => a ++ b ).map(_.toLong)
-      var candidatesRDD = pages.filter( h =>  onlyCandidates.contains( h.sid ) )
 
       if( !article.ranked ) {
 
-        var candidates = onlyCandidates
-        while (!candidates.isEmpty) {
-          val block = 10
-          val current = candidates.take(block)
-          candidates = candidates.drop(block)
 
-          //obtain the internal neighborhoods of the candidates
-          val graph = getInternalNet(dumpDir, step, current, lang: _*)
-          val candidatesRDD = graph.vertices.filter(v => current.contains(v._1))
-          originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates, step))
-
-        }
+        //obtain the internal neighborhoods of the candidates
+        val candidatesRDD = getInternalNet(dumpDir, step, onlyCandidates, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+        //originalGraph = originalGraph.joinVertices(candidatesRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, u.crossNet, u.stepNet, u.egoNet, u.candidates, step))
 
         //candidatesRDD = originalGraph.vertices.filter { case (id, h) => onlyCandidates.contains(h.sid) }.map { case (id, h) => h }.toDF().as[WikiPage]
 
-        //val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
-        //originalGraph = originalGraph.joinVertices(ranked)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, u.candidates, o.step, true))
+        val ranked = rankCandidates(originalGraph, homologousRDD, candidatesRDD)
+        originalGraph = originalGraph.joinVertices(ranked)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, u.candidates, o.step, true))
 
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
@@ -352,50 +345,50 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     }
   }
 
-  def getInternalNet(dumpDir: String, steps: Int, ego: Set[Long], lang: String *): Graph[WikiPage, Link] = {
-
-    val pages = getCrossPages(dumpDir, lang: _*)
-    val links = gb.getPageLinks(dumpDir, false, lang: _* )
-
-    val internalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
-
-    def sendMessage(t: EdgeTriplet[WikiPage, Link]): Iterator[(VertexId, Neighborhood)] = {
-
-      val all = if (ego.contains(t.srcId) || mapContainsEgo(t.srcAttr.stepNet, ego)) {
-
-        val srcMap = if (t.srcAttr.stepNet.isEmpty) t.dstAttr.crossNet else t.dstAttr.stepNet
-        val dstMap = if (t.dstAttr.stepNet.isEmpty) t.srcAttr.crossNet else t.srcAttr.stepNet
-        val srcSet = t.srcAttr.egoNet + t.srcId + t.dstId
-
-        ( mergeMaps(srcMap, dstMap), srcSet )
-
-      } else ( Map[String, Set[Long]](), Set[Long]())
-
-      val msg = Seq(
-        (t.srcId, Neighborhood(all._1, all._2 )),
-        (t.dstId, Neighborhood(all._1, all._2))
-      )
-
-      msg.iterator
-
-    }
-
-    def mergeMessage(m1: Neighborhood, m2: Neighborhood) = {
-      val vMap = mergeMaps(m1.kNet, m2.kNet)
-      Neighborhood(vMap, m1.oneNet ++ m2.oneNet )
-    }
-
-    def vertexProgram(vertexId: VertexId, vInfo: WikiPage, message: Neighborhood) = {
-      WikiPage(vInfo.sid, vInfo.id, vInfo.title, vInfo.lang, vInfo.crossNet, message.kNet, message.oneNet)
-    }
-
-    val initialMessage = Neighborhood()
-
-    Pregel(internalGraph, initialMessage, steps * 2, activeDirection = EdgeDirection.Out)(
-      vprog = vertexProgram,
-      sendMsg = sendMessage,
-      mergeMsg = mergeMessage)
-  }
+//  def getInternalNet(dumpDir: String, steps: Int, ego: Set[Long], lang: String *): Graph[WikiPage, Link] = {
+//
+//    val pages = getCrossPages(dumpDir, lang: _*)
+//    val links = gb.getPageLinks(dumpDir, false, lang: _* )
+//
+//    val internalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
+//
+//    def sendMessage(t: EdgeTriplet[WikiPage, Link]): Iterator[(VertexId, Neighborhood)] = {
+//
+//      val all = if (ego.contains(t.srcId) || mapContainsEgo(t.srcAttr.stepNet, ego)) {
+//
+//        val srcMap = if (t.srcAttr.stepNet.isEmpty) t.dstAttr.crossNet else t.dstAttr.stepNet
+//        val dstMap = if (t.dstAttr.stepNet.isEmpty) t.srcAttr.crossNet else t.srcAttr.stepNet
+//        val srcSet = t.srcAttr.egoNet + t.srcId + t.dstId
+//
+//        ( mergeMaps(srcMap, dstMap), srcSet )
+//
+//      } else ( Map[String, Set[Long]](), Set[Long]())
+//
+//      val msg = Seq(
+//        (t.srcId, Neighborhood(all._1, all._2 )),
+//        (t.dstId, Neighborhood(all._1, all._2))
+//      )
+//
+//      msg.iterator
+//
+//    }
+//
+//    def mergeMessage(m1: Neighborhood, m2: Neighborhood) = {
+//      val vMap = mergeMaps(m1.kNet, m2.kNet)
+//      Neighborhood(vMap, m1.oneNet ++ m2.oneNet )
+//    }
+//
+//    def vertexProgram(vertexId: VertexId, vInfo: WikiPage, message: Neighborhood) = {
+//      WikiPage(vInfo.sid, vInfo.id, vInfo.title, vInfo.lang, vInfo.crossNet, message.kNet, message.oneNet)
+//    }
+//
+//    val initialMessage = Neighborhood()
+//
+//    Pregel(internalGraph, initialMessage, steps * 2, activeDirection = EdgeDirection.Out)(
+//      vprog = vertexProgram,
+//      sendMsg = sendMessage,
+//      mergeMsg = mergeMessage)
+//  }
 
   def getMapVector( originalGraph:Graph[WikiPage, Link], neighborhood: Set[Long] ) ={
 
@@ -432,22 +425,20 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
   }
 
 
-  def getInternalNet( dumpDir:String , article: WikiPage , step: Int, lang: String*  ): RDD[(VertexId, WikiPage)] ={
+  def getInternalNet(dumpDir: String, step: Int, ego: Set[Long], lang: String *): RDD[(VertexId, WikiPage)] ={
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
     val links = gb.getPageLinks(dumpDir, false, lang: _*)
     val graph = gb.getValidGraph(pages, links, ElementType.PageLink.toString).persist()
 
-    //get Homologous Nodes
-    val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
 
     //get the internal neighborhood of the homologous nodes
-    val stepNet = getKStepNeighborhood(graph, step, homologousIDs)
+    val stepNet = getKStepNeighborhood(graph, step, ego)
 
     val langStepNet = getTranslatatedNeighborhood( pages, stepNet ).persist()
-    val egoNet = if(step == 1 ) stepNet else getKStepNeighborhood(graph, 1, homologousIDs).persist()
+    val egoNet = if(step == 1 ) stepNet else getKStepNeighborhood(graph, 1, ego).persist()
 
-    val homologous = pages.filter( p => homologousIDs.contains(p.sid) ).select('sid, 'id,'title,'lang,'crossNet,'candidates,'step,'ranked).persist()
+    val homologous = pages.filter( p => ego.contains(p.sid) ).select('sid, 'id,'title,'lang,'crossNet,'candidates,'step,'ranked).persist()
 
     val joinedNet = langStepNet.join(egoNet,"ego").withColumnRenamed("ego","sid").persist()
 
