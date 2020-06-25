@@ -11,7 +11,7 @@ trait CsvWriter {
     df_tmp.write.option("delimiter", "\t")
             .option("header", writeHeader)
             .option("quote", "")
-            .option("compression", "gzip")
+            //.option("compression", "gzip")
             .mode(mode)
             .csv(outputPath)
   }

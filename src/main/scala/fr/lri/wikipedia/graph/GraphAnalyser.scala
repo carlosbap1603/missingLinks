@@ -3,13 +3,13 @@ package fr.lri.wikipedia.graph
 import java.nio.file.Paths
 
 import breeze.linalg.{DenseVector, norm}
-import fr.lri.wikipedia.{AvroWriter, EgoNet, ElementType, JaccardVector, LangEgoNet, Link, Neighborhood, WikiLink, WikiPage}
+import fr.lri.wikipedia.{AvroWriter, CsvWriter, EgoNet, ElementType, JaccardVector, LangEgoNet, Link, Neighborhood, WikiLink, WikiPage}
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{AnalysisException, Dataset, SparkSession}
+import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.sql.functions.explode
 
-class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWriter {
+class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWriter with CsvWriter{
 
   import session.implicits._
 
@@ -69,7 +69,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 //    writeAvro( pages.toDF(), s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}" )
 //
 //  }
-  
+
   def removeAnomalies( pages: VertexRDD[WikiPage] ): Dataset[WikiPage] ={
 
     val fixedAnomalies = pages.filter{ case (vid, p) => !p.crossNet.isEmpty && p.crossNet.values.filter( s => s.size > 1 ).size > 0 }
@@ -395,7 +395,12 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       val count = candidates.count().toInt
 
       println(s"Candidate recommendations: ${count}")
-      result.orderBy('lang,'from, 'jaccard).show(count, false)
+      val table = result.orderBy('lang,'from, 'jaccard)
+
+      table.show(count, false)
+
+      writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/${titleSearch}_${lang.mkString("_")}", coalesce = true)
+
     }
   }
 
