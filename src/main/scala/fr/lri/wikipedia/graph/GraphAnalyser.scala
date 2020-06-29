@@ -417,7 +417,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       val last = top5.union(avgTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
                     .union(avgNonTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
 
-      println(s"Candidate recommendations: ${count}")
+      println(s"Candidate recommendations for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
       val table = last.orderBy('lang,'from, 'rank)
 
       table.show(count, false)
