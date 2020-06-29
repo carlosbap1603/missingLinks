@@ -6,7 +6,7 @@ import breeze.linalg.{DenseVector, norm}
 import fr.lri.wikipedia.{AvroWriter, CsvWriter, EgoNet, ElementType, JaccardVector, LangEgoNet, Link, Neighborhood, WikiLink, WikiPage}
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{Dataset, Row, SparkSession}
+import org.apache.spark.sql.{AnalysisException, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions.{last, _}
 import org.apache.spark.sql.expressions.Window
 
@@ -139,20 +139,20 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     var pages:Dataset[WikiPage] = null
     var anomalies:Dataset[WikiPage] = null
 
-//    try {
-//
-//      anomalies = session.read.format("avro").load(anomalyPath).as[WikiPage]
-//      pages = getCrossPages(dumpDir, lang: _*)
-//
-//    } catch {
-//      case e: AnalysisException => {
+    try {
+
+      anomalies = session.read.format("avro").load(anomalyPath).as[WikiPage]
+      pages = getCrossPages(dumpDir, lang: _*)
+
+    } catch {
+      case e: AnalysisException => {
 
         executeCrossLinkAnalysis(dumpDir, lang: _*)
         anomalies = session.read.format("avro").load(anomalyPath).as[WikiPage]
         pages = getCrossPages(dumpDir, lang: _*)
 
-//      }
-//    }
+      }
+    }
 
     val expandAnomalies = anomalies.flatMap{ p =>
       var error = Seq[(Long,String,String,Long)]()
@@ -422,18 +422,15 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
                                 .join( to, "to")
                                 .select('from, 'from_title, 'to,'to_title, 'lang )
 
-        table = result.orderBy('lang,'from, 'rank)
+        table = result.orderBy('lang,'from,'to)
       }
 
 
       val count = table.count().toInt
 
-
       println(s"Candidate recommendations for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
-
-
+      
       table.show(count, false)
-
       writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/${titleSearch}_${lang.mkString("_")}", coalesce = true)
 
     }
