@@ -7,7 +7,8 @@ import fr.lri.wikipedia.{AvroWriter, CsvWriter, EgoNet, ElementType, JaccardVect
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Dataset, SparkSession}
-import org.apache.spark.sql.functions.explode
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.expressions.Window
 
 class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWriter with CsvWriter{
 
@@ -394,8 +395,30 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
       val count = candidates.count().toInt
 
+      val windowSpec = Window.partitionBy('lang).orderBy('jaccard.desc)
+
+      val top5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank <= 5)
+      val nonTop5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank > 5)
+
+      val avgTop5 = top5.groupBy('from, 'from_title, 'lang)
+                        .avg("jaccard")
+                        .withColumn("to", lit(0))
+                        .withColumn("rank", lit(6))
+                        .withColumn("to_title", lit("AVG_TOP_5"))
+                        .withColumnRenamed("avg(jaccard)", "jaccard")
+
+      val avgNonTop5 = nonTop5.groupBy('from, 'from_title, 'lang)
+                              .avg("jaccard")
+                              .withColumn("to", lit(0))
+                              .withColumn("rank", lit(7))
+                              .withColumn("to_title", lit("AVG_NON_TOP_5"))
+                              .withColumnRenamed("avg(jaccard)", "jaccard")
+
+      val last = top5.union(avgTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
+                    .union(avgNonTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
+
       println(s"Candidate recommendations: ${count}")
-      val table = result.orderBy('lang,'from, 'jaccard)
+      val table = last.orderBy('lang,'from, 'rank)
 
       table.show(count, false)
 
