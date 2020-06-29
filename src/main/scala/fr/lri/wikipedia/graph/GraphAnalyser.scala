@@ -6,8 +6,8 @@ import breeze.linalg.{DenseVector, norm}
 import fr.lri.wikipedia.{AvroWriter, CsvWriter, EgoNet, ElementType, JaccardVector, LangEgoNet, Link, Neighborhood, WikiLink, WikiPage}
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{Dataset, SparkSession}
-import org.apache.spark.sql.functions._
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
+import org.apache.spark.sql.functions.{last, _}
 import org.apache.spark.sql.expressions.Window
 
 class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWriter with CsvWriter{
@@ -277,7 +277,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
         val homologousRDD = getInternalNet(dumpDir, step,homologousIDs, lang:_* )
 
-        originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.vector,u.candidates, step ))
+        originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.vector,u.candidates, step, o.ranked ))
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
         val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
@@ -384,41 +384,53 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       .withColumnRenamed("title","to_title")
       .select('to, 'to_title)
 
-      val result = if( ranked )
-                      candidates.join( from, "from")
+      var table:Dataset[Row] = null;
+
+      if( ranked ) {
+
+        val result = candidates.join( from, "from")
                                 .join( to, "to")
                                 .select('from, 'from_title, 'to,'to_title, 'jaccard, 'lang )
-                    else
-                      candidates.join( from, "from")
+
+        val windowSpec = Window.partitionBy('lang).orderBy('jaccard.desc)
+
+        val top5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank <= 5)
+        val nonTop5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank > 5)
+
+        val avgTop5 = top5.groupBy('from, 'from_title, 'lang)
+          .avg("jaccard")
+          .withColumn("to", lit(0))
+          .withColumn("rank", lit(6))
+          .withColumn("to_title", lit("AVG_TOP_5"))
+          .withColumnRenamed("avg(jaccard)", "jaccard")
+
+        val avgNonTop5 = nonTop5.groupBy('from, 'from_title, 'lang)
+          .avg("jaccard")
+          .withColumn("to", lit(0))
+          .withColumn("rank", lit(7))
+          .withColumn("to_title", lit("AVG_NON_TOP_5"))
+          .withColumnRenamed("avg(jaccard)", "jaccard")
+
+        val resultUnion = top5.union(avgTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
+          .union(avgNonTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
+
+        table = resultUnion.orderBy('lang,'from, 'rank)
+
+      } else {
+
+        val result = candidates.join( from, "from")
                                 .join( to, "to")
                                 .select('from, 'from_title, 'to,'to_title, 'lang )
 
-      val count = candidates.count().toInt
+        table = result.orderBy('lang,'from, 'rank)
+      }
 
-      val windowSpec = Window.partitionBy('lang).orderBy('jaccard.desc)
 
-      val top5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank <= 5)
-      val nonTop5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank > 5)
+      val count = table.count().toInt
 
-      val avgTop5 = top5.groupBy('from, 'from_title, 'lang)
-                        .avg("jaccard")
-                        .withColumn("to", lit(0))
-                        .withColumn("rank", lit(6))
-                        .withColumn("to_title", lit("AVG_TOP_5"))
-                        .withColumnRenamed("avg(jaccard)", "jaccard")
-
-      val avgNonTop5 = nonTop5.groupBy('from, 'from_title, 'lang)
-                              .avg("jaccard")
-                              .withColumn("to", lit(0))
-                              .withColumn("rank", lit(7))
-                              .withColumn("to_title", lit("AVG_NON_TOP_5"))
-                              .withColumnRenamed("avg(jaccard)", "jaccard")
-
-      val last = top5.union(avgTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
-                    .union(avgNonTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
 
       println(s"Candidate recommendations for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
-      val table = last.orderBy('lang,'from, 'rank)
+
 
       table.show(count, false)
 
