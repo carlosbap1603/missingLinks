@@ -292,7 +292,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
   def executeRankAnalysis(dumpDir:String , titleSearch: String, step: Int, lang: String*  ) = {
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
-    val search = pages.filter( 'title === titleSearch )
+    val search = pages.filter( 'title === titleSearch && 'lang == "en")
 
     if (search.count() > 0) {
 
@@ -429,7 +429,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       val count = table.count().toInt
 
       println(s"Candidate recommendations for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
-      
+
       table.show(count, false)
       writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/${titleSearch}_${lang.mkString("_")}", coalesce = true)
 
