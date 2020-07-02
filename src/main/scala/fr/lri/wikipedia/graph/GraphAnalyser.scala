@@ -421,7 +421,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         println(s"Candidate ranking for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
 
         table.show(count, false)
-        writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/rank_${titleSearch}_${lang.mkString("_")}", coalesce = true
+        writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/rank_${titleSearch}_${lang.mkString("_")}", coalesce = true )
 
       } else {
 
