@@ -262,7 +262,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
   def executeInternalLinkAnalysis( dumpDir:String , titleSearch: String , step: Int, lang: String* ) = {
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
-    val search = pages.filter( 'title === titleSearch )
+    val search = pages.filter( 'title === titleSearch && 'lang === "en")
 
     if (search.count() > 0) {
 
@@ -416,23 +416,29 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
         table = resultUnion.orderBy('lang,'from, 'rank)
 
+        val count = table.count().toInt
+
+        println(s"Candidate ranking for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
+
+        table.show(count, false)
+        writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/rank_${titleSearch}_${lang.mkString("_")}", coalesce = true
+
       } else {
 
-        val result = candidates.join( from, "from")
-                                .join( to, "to")
-                                .select('from, 'from_title, 'to,'to_title, 'lang )
+        val result = candidates.join(from, "from")
+          .join(to, "to")
+          .select('from, 'from_title, 'to, 'to_title, 'lang)
 
-        table = result.orderBy('lang,'from,'to)
+        table = result.orderBy('lang, 'from, 'to)
+
+        val count = table.count().toInt
+
+        println(s"Candidate recommendations for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
+
+        table.show(count, false)
+        writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/reccomendation_${titleSearch}_${lang.mkString("_")}", coalesce = true)
+
       }
-
-
-      val count = table.count().toInt
-
-      println(s"Candidate recommendations for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
-
-      table.show(count, false)
-      writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/${titleSearch}_${lang.mkString("_")}", coalesce = true)
-
     }
   }
 
