@@ -241,15 +241,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
                                          .withColumnRenamed("vector", "toVector"), "to" )
                                   .select("from","fromVector","to","toVector").as[JaccardVector]
 
-//    val articlePairs = homologousRDD.flatMap{ h =>
-//      var candidateSet =  Seq[(Long,Long)]()
-//
-//      h.candidates.keySet.foreach{ c =>
-//        candidateSet = candidateSet :+ (h.sid, c.toLong )
-//      }
-//      candidateSet.iterator
-//    }.toDF("from", "to")
-
     val jaccard = vectorPairs.map{ j =>  j.from -> Map( j.to -> getJaccard( j.fromVector, j.toVector ) ) }.rdd
     val reduced = jaccard.reduceByKey( (a, b) => a++b ).toDF("sid", "rankedCandidates")
 
@@ -384,8 +375,6 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       .withColumnRenamed("title","to_title")
       .select('to, 'to_title)
 
-      var table:Dataset[Row] = null;
-
       if( ranked ) {
 
         val result = candidates.join( from, "from")
@@ -394,34 +383,31 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
         val windowSpec = Window.partitionBy('lang).orderBy('jaccard.desc)
 
-        val top5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank <= 5)
-        val nonTop5 = result.withColumn("rank", row_number().over(windowSpec)).filter('rank > 5)
+        val k = 10
 
-        val avgTop5 = top5.groupBy('from, 'from_title, 'lang)
+        val topK = result.withColumn("rank", row_number().over(windowSpec)).filter('rank <= k)
+        val nonTopK = result.withColumn("rank", row_number().over(windowSpec)).filter('rank > k)
+
+        var stats = result.groupBy('from, 'from_title, 'lang).agg(max('jaccard), min('jaccard), avg('jaccard), stddev('jaccard),skewness('jaccard))
+
+        val avgTopK = topK.groupBy('from, 'from_title, 'lang)
           .avg("jaccard")
-          .withColumn("to", lit(0))
-          .withColumn("rank", lit(6))
-          .withColumn("to_title", lit("AVG_TOP_5"))
-          .withColumnRenamed("avg(jaccard)", "jaccard")
+          .withColumnRenamed("avg(jaccard)", s"avg top ${k}(jaccard)")
 
-        val avgNonTop5 = nonTop5.groupBy('from, 'from_title, 'lang)
+        val avgNonTopK = nonTopK.groupBy('from, 'from_title, 'lang)
           .avg("jaccard")
-          .withColumn("to", lit(0))
-          .withColumn("rank", lit(7))
-          .withColumn("to_title", lit("AVG_NON_TOP_5"))
-          .withColumnRenamed("avg(jaccard)", "jaccard")
+          .withColumnRenamed("avg(jaccard)", s"avg non top ${k}(jaccard)")
 
-        val resultUnion = top5.union(avgTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
-          .union(avgNonTop5.select('from,'from_title, 'to,'to_title,'jaccard, 'lang,'rank))
+        println(s"Candidate ranking for ${titleSearch} in languages '${lang.mkString("_")}'")
+        topK.show(k, false)
+        writeCsv(topK.toDF(), s"${dumpDir}/analysis/articles/rank_top_${k}_${titleSearch}_${lang.mkString("_")}", coalesce = true )
 
-        table = resultUnion.orderBy('lang,'from, 'rank)
+        stats = stats.join( avgTopK, Seq("from", "from_title", "lang" ), "left")
+        stats = stats.join( avgNonTopK, Seq("from", "from_title", "lang" ), "left")
 
-        val count = table.count().toInt
-
-        println(s"Candidate ranking for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
-
-        table.show(count, false)
-        writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/rank_${titleSearch}_${lang.mkString("_")}", coalesce = true )
+        println(s"Candidate ranking stats ${titleSearch} in languages '${lang.mkString("_")}'")
+        stats.show(10, false)
+        writeCsv(stats.toDF(), s"${dumpDir}/analysis/articles/rank_stats_${titleSearch}_${lang.mkString("_")}", coalesce = true )
 
       } else {
 
@@ -429,63 +415,17 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
           .join(to, "to")
           .select('from, 'from_title, 'to, 'to_title, 'lang)
 
-        table = result.orderBy('lang, 'from, 'to)
+        val table = result.orderBy('lang, 'from, 'to)
 
         val count = table.count().toInt
 
         println(s"Candidate recommendations for ${titleSearch} in languages '${lang.mkString("_")}': ${count}")
-
         table.show(count, false)
-        writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/reccomendation_${titleSearch}_${lang.mkString("_")}", coalesce = true)
+        writeCsv(table.toDF(), s"${dumpDir}/analysis/articles/recommendation_${titleSearch}_${lang.mkString("_")}", coalesce = true)
 
       }
     }
   }
-
-//  def getInternalNet(dumpDir: String, steps: Int, ego: Set[Long], lang: String *): Graph[WikiPage, Link] = {
-//
-//    val pages = getCrossPages(dumpDir, lang: _*)
-//    val links = gb.getPageLinks(dumpDir, false, lang: _* )
-//
-//    val internalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString )
-//
-//    def sendMessage(t: EdgeTriplet[WikiPage, Link]): Iterator[(VertexId, Neighborhood)] = {
-//
-//      val all = if (ego.contains(t.srcId) || mapContainsEgo(t.srcAttr.stepNet, ego)) {
-//
-//        val srcMap = if (t.srcAttr.stepNet.isEmpty) t.dstAttr.crossNet else t.dstAttr.stepNet
-//        val dstMap = if (t.dstAttr.stepNet.isEmpty) t.srcAttr.crossNet else t.srcAttr.stepNet
-//        val srcSet = t.srcAttr.egoNet + t.srcId + t.dstId
-//
-//        ( mergeMaps(srcMap, dstMap), srcSet )
-//
-//      } else ( Map[String, Set[Long]](), Set[Long]())
-//
-//      val msg = Seq(
-//        (t.srcId, Neighborhood(all._1, all._2 )),
-//        (t.dstId, Neighborhood(all._1, all._2))
-//      )
-//
-//      msg.iterator
-//
-//    }
-//
-//    def mergeMessage(m1: Neighborhood, m2: Neighborhood) = {
-//      val vMap = mergeMaps(m1.kNet, m2.kNet)
-//      Neighborhood(vMap, m1.oneNet ++ m2.oneNet )
-//    }
-//
-//    def vertexProgram(vertexId: VertexId, vInfo: WikiPage, message: Neighborhood) = {
-//      WikiPage(vInfo.sid, vInfo.id, vInfo.title, vInfo.lang, vInfo.crossNet, message.kNet, message.oneNet)
-//    }
-//
-//    val initialMessage = Neighborhood()
-//
-//    Pregel(internalGraph, initialMessage, steps * 2, activeDirection = EdgeDirection.Out)(
-//      vprog = vertexProgram,
-//      sendMsg = sendMessage,
-//      mergeMsg = mergeMessage)
-//  }
 
   def getMapVector( originalGraph:Graph[WikiPage,Link], neighborhood: Set[Long] ):Map[String,Double]={
 
