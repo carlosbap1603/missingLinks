@@ -399,14 +399,16 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
           .withColumnRenamed("avg(jaccard)", s"avg non top ${k}(jaccard)")
 
         println(s"Candidate ranking for ${titleSearch} in languages '${lang.mkString("_")}'")
-        topK.show(k, false)
+        val count = topK.count().toInt
+        topK.show( count, false)
         writeCsv(topK.toDF(), s"${dumpDir}/analysis/articles/rank_top_${k}_${titleSearch}_${lang.mkString("_")}", coalesce = true )
 
         stats = stats.join( avgTopK, Seq("from", "from_title", "lang" ), "left")
         stats = stats.join( avgNonTopK, Seq("from", "from_title", "lang" ), "left")
 
         println(s"Candidate ranking stats ${titleSearch} in languages '${lang.mkString("_")}'")
-        stats.show(10, false)
+        val count2 = stats.count().toInt
+        stats.show(count2, false)
         writeCsv(stats.toDF(), s"${dumpDir}/analysis/articles/rank_stats_${titleSearch}_${lang.mkString("_")}", coalesce = true )
 
       } else {
