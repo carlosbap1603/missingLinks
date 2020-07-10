@@ -9,6 +9,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{AnalysisException, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions.{last, _}
 import org.apache.spark.sql.expressions.Window
+import org.apache.spark.sql.types.{DataTypes, DecimalType}
 
 class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWriter with CsvWriter{
 
@@ -377,9 +378,10 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
       if( ranked ) {
 
-        val result = candidates.join( from, "from")
+        var result = candidates.join( from, "from")
                                 .join( to, "to")
                                 .select('from, 'from_title, 'to,'to_title, 'jaccard, 'lang )
+                                .withColumn("jaccard", col("jaccard").cast(DecimalType(4,4)))
 
         val windowSpec = Window.partitionBy('lang).orderBy('jaccard.desc)
 
