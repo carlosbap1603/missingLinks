@@ -268,7 +268,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
         val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
         val homologousRDD = getInternalNet(dumpDir, step,homologousIDs, lang:_* )
 
-        originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.vector,u.candidates, step, false ))
+        originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.vector,u.candidates, step, u.ranked ))
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
         val outputPath = s"${dumpDir}/analysis/crosslinks_${lang.mkString("_")}"
