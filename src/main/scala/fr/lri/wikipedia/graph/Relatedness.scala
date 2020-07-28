@@ -16,7 +16,7 @@ class RelatednessConf(args:Seq[String]) extends ScallopConf(args) with Serializa
 object Relatedness {
 
   val sconf = new SparkConf().setAppName("Wikipedia: similarity analysis")
-                                .setMaster("local[*]")
+//                                .setMaster("local[*]")
   val session = SparkSession.builder.config(sconf).getOrCreate()
   val ga = new GraphAnalyser(session)
 
