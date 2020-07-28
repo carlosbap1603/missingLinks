@@ -526,4 +526,58 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
   }
 
+  def getSimilarity( homologousA: Dataset[WikiPage], homologousB: Dataset[WikiPage] ):Unit ={
+
+    val A = homologousA.select('sid, 'title, 'vector, 'lang)
+      .withColumnRenamed("sid","from")
+      .withColumnRenamed("title","fromTitle")
+      .withColumnRenamed("vector","fromVector")
+
+    val B = homologousB.select('sid,'title, 'vector, 'lang)
+      .withColumnRenamed("sid","to")
+      .withColumnRenamed("title","toTitle")
+      .withColumnRenamed("vector","toVector")
+
+    val joined = A.join( B, "lang" )
+
+    val vectorPairs = joined.select("from","fromVector","to","toVector").as[JaccardVector]
+
+    val jaccard = vectorPairs.map{ j =>  (j.from, j.to, getJaccard( j.fromVector, j.toVector ) ) }.toDF("from", "to", "jaccard")
+
+    val result = joined.join(jaccard, Seq("from", "to")).select("from", "fromTitle", "to", "toTitle", "lang","jaccard").orderBy("lang")
+
+
+    result.show(false)
+
+  }
+
+  def executeSimilarityAnalysis(dumpDir:String , titleA: String, titleB: String, step: Int, lang: String*  ) = {
+
+    val pages = getCrossPages(dumpDir, lang: _*).persist()
+    val searchA = pages.filter( 'title === titleA && 'lang === "en")
+    val searchB = pages.filter( 'title === titleB && 'lang === "en")
+
+    if ( searchA.count() > 0 && searchB.count() > 0 ) {
+
+      val articleA = searchA.first()
+      val articleB = searchB.first()
+
+      val links = gb.getPageLinks(dumpDir, false, lang: _*).persist()
+      var originalGraph = gb.getValidGraph(pages, links, ElementType.PageLink.toString)
+
+      //get Homologous Nodes
+      val homologousA = articleA.crossNet.values.reduce((a, b) => a ++ b)
+      //obtain the internal neighborhoods of the first Article
+      val homologousArdd = getInternalNet(dumpDir, step, homologousA, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+
+      //get Homologous Nodes
+      val homologousB = articleB.crossNet.values.reduce((a, b) => a ++ b)
+      //obtain the internal neighborhoods of the second Article
+      val homologousBrdd = getInternalNet(dumpDir, step, homologousB, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+
+      val ranked = getSimilarity( homologousArdd, homologousBrdd)
+
+    }
+  }
+
 }
