@@ -1,15 +1,15 @@
 package fr.lri.wikipedia.graph
 
 import java.nio.file.Paths
-
 import breeze.linalg.{DenseVector, norm}
-import fr.lri.wikipedia.{AvroWriter, CsvWriter, EgoNet, ElementType, JaccardVector, LangEgoNet, Link, Neighborhood, WikiLink, WikiPage}
+import fr.lri.wikipedia.centrality.CentralityMeasure
+import fr.lri.wikipedia.{AvroWriter, CsvWriter, EgoNet, ElementType, JaccardVector, LangEgoNet, Link, Neighborhood, WikiPage}
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{AnalysisException, Dataset, Row, SparkSession}
-import org.apache.spark.sql.functions.{last, _}
+import org.apache.spark.sql.{AnalysisException, Dataset, SparkSession}
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.types.{DataTypes, DecimalType}
+import org.apache.spark.sql.types.DecimalType
 
 class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWriter with CsvWriter{
 
@@ -251,7 +251,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     result.map{ x => (x.sid, x) }.rdd
   }
 
-  def executeInternalLinkAnalysis( dumpDir:String , titleSearch: String , step: Int, lang: String* ) = {
+  def executeInternalLinkAnalysis( dumpDir:String , titleSearch: String , step: Int, centrality: CentralityMeasure, lang: String* ) = {
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
     val search = pages.filter( 'title === titleSearch && 'lang === "en")
@@ -267,7 +267,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
         //get Homologous Nodes
         val homologousIDs = article.crossNet.values.reduce((a, b) => a ++ b)
-        val homologousRDD = getInternalNet(dumpDir, step,homologousIDs, lang:_* )
+        val homologousRDD = getInternalNet(dumpDir, step,homologousIDs, centrality, lang:_* )
 
         originalGraph = originalGraph.joinVertices(homologousRDD)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, u.stepNet, u.egoNet, u.vector,u.candidates, step, u.ranked ))
         val result = originalGraph.vertices.map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
@@ -281,7 +281,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     }
   }
 
-  def executeRankAnalysis(dumpDir:String , titleSearch: String, step: Int, lang: String*  ) = {
+  def executeRankAnalysis(dumpDir:String , titleSearch: String, step: Int, centrality: CentralityMeasure, lang: String*  ) = {
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
     val search = pages.filter( 'title === titleSearch && 'lang === "en")
@@ -303,7 +303,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       if( !article.ranked ) {
 
         //obtain the internal neighborhoods of the candidates
-        val candidatesRDD = getInternalNet(dumpDir, step, onlyCandidates, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+        val candidatesRDD = getInternalNet(dumpDir, step, onlyCandidates, centrality, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
         val ranked = rankCandidates( homologousRDD, candidatesRDD)
 
         originalGraph = originalGraph.joinVertices(ranked)((id, o, u) => WikiPage(o.sid, o.id, o.title, o.lang, o.crossNet, o.stepNet, o.egoNet, o.vector, u.candidates, o.step, true))
@@ -431,20 +431,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
     }
   }
 
-  def getMapVector( originalGraph:Graph[WikiPage,Link], neighborhood: Set[Long] ):Map[String,Double]={
 
-    val map = if( !neighborhood.isEmpty ) {
-
-      val neighborhoodGraph = originalGraph.subgraph(vpred = (id,_) => neighborhood.contains(id))
-      val pRankGraph = neighborhoodGraph.pageRank(0.01)
-
-      pRankGraph.vertices.map { case (id, rank) =>
-        Map(id.toString -> (1/rank) )
-      }.reduce((a, b) => a ++ b)
-    }else{ Map[String,Double]() }
-
-    map
-  }
 
   def getJaccard(m1: Map[String, Double], m2: Map[String, Double]): Double = {
 
@@ -466,7 +453,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
   }
 
 
-  def getInternalNet(dumpDir: String, step: Int, egos: Set[Long], lang: String *): RDD[(VertexId, WikiPage)] ={
+  def getInternalNet(dumpDir: String, step: Int, egos: Set[Long], centrality: CentralityMeasure, lang: String *): RDD[(VertexId, WikiPage)] ={
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
     val links = gb.getPageLinks(dumpDir, false, lang: _*)
@@ -477,7 +464,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
     //given the neighborhood of each ego node, calculate the representative vector
     var vectors = Seq[(Long,Map[String,Double])]()
-    stepNet.collect.foreach{ page => vectors = vectors :+ ( (page.ego, getMapVector(graph, page.egoNet)) ) }
+    stepNet.collect.foreach{ page => vectors = vectors :+ ( (page.ego, centrality.getMapVector(graph, page.egoNet)) ) }
 
     val vectorsRDD = vectors.toDF("ego","vector")
 
@@ -551,7 +538,7 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
 
   }
 
-  def executeSimilarityAnalysis(dumpDir:String , titleA: String, titleB: String, step: Int, lang: String*  ) = {
+  def executeSimilarityAnalysis(dumpDir:String , titleA: String, titleB: String, step: Int, centrality: CentralityMeasure, lang: String*  ) = {
 
     val pages = getCrossPages(dumpDir, lang: _*).persist()
     val searchA = pages.filter( 'title === titleA && 'lang === "en")
@@ -568,12 +555,12 @@ class GraphAnalyser(val session: SparkSession) extends Serializable with AvroWri
       //get Homologous Nodes
       val homologousA = articleA.crossNet.values.reduce((a, b) => a ++ b)
       //obtain the internal neighborhoods of the first Article
-      val homologousArdd = getInternalNet(dumpDir, step, homologousA, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+      val homologousArdd = getInternalNet(dumpDir, step, homologousA, centrality, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
       //get Homologous Nodes
       val homologousB = articleB.crossNet.values.reduce((a, b) => a ++ b)
       //obtain the internal neighborhoods of the second Article
-      val homologousBrdd = getInternalNet(dumpDir, step, homologousB, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
+      val homologousBrdd = getInternalNet(dumpDir, step, homologousB, centrality, lang: _*).map { case (vid, vInfo) => vInfo }.toDF().as[WikiPage]
 
       val ranked = getSimilarity( homologousArdd, homologousBrdd)
 
