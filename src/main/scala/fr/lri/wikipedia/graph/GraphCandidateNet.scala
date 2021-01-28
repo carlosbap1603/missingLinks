@@ -1,6 +1,6 @@
 package fr.lri.wikipedia.graph
 
-import fr.lri.wikipedia.centrality.CentralityMeasure
+import fr.lri.wikipedia.centrality.{CentralityMeasure, CentralityType}
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.rogach.scallop.{ScallopConf, Serialization}
@@ -30,7 +30,8 @@ object GraphCandidateNet {
     val lang = conf.languages()
     val centrality = conf.centrality()
 
-    ga.executeInternalLinkAnalysis(dumpDir, titleSearch, step, CentralityMeasure(centrality),lang: _*)
+    val centralityType = CentralityMeasure( CentralityType.withName( centrality) )
+    ga.executeInternalLinkAnalysis(dumpDir, titleSearch, step, centralityType, lang: _*)
 
   }
 }

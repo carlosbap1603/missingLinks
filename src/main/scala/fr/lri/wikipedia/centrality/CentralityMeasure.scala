@@ -13,10 +13,10 @@ object CentralityType extends Enumeration {
 }
 
 object CentralityMeasure{
-  def apply(centralityType:String):CentralityMeasure = {
+  def apply(centralityType:CentralityType.Value):CentralityMeasure = {
     centralityType match {
-      case CentralityType.RECIPROCAL_PAGE_RANK.toString => new ReciprocalPageRank()
-      case CentralityType.HITS.toString => new HITS()
+      case CentralityType.RECIPROCAL_PAGE_RANK => new ReciprocalPageRank()
+      case CentralityType.HITS => new HITS()
       case _ => new ReciprocalPageRank()
     }
   }
