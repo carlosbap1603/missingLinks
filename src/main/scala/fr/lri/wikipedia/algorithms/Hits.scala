@@ -12,7 +12,7 @@ object Hits {
   case class HitsMsg(authScore:Double, hubScore:Double)
 
 
-  def initialize[VD:ClassTag, ED: ClassTag](graph: Graph[VD, ED], maxSteps: Int) ( implicit spark: SparkSession): Graph[VertexAttr, ED] = {
+  def initialize[VD:ClassTag, ED: ClassTag](graph: Graph[VD, ED], maxSteps: Int): Graph[VertexAttr, ED] = {
     val hitsGraph = graph.mapVertices { case (vid, _) =>
       new VertexAttr( srcId = vid, authScore = 1.0, hubScore = 1.0 )
     }
@@ -25,7 +25,7 @@ object Hits {
       HitsMsg(msg1.authScore + msg2.authScore, msg1.hubScore + msg2.hubScore)
     }
 
-    def vertexProgram(vId: VertexId, vInfo: VertexAttr, message: HitsMsg)( implicit spark: SparkSession): VertexAttr = {
+    def vertexProgram(vId: VertexId, vInfo: VertexAttr, message: HitsMsg): VertexAttr = {
       VertexAttr(vInfo.srcId, if (message.authScore == 0.0) 1.0 else message.authScore , if (message.hubScore == 0.0) 1.0 else message.hubScore)
     }
 

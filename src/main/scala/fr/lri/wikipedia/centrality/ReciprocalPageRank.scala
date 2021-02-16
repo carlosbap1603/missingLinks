@@ -2,6 +2,7 @@ package fr.lri.wikipedia.centrality
 
 import fr.lri.wikipedia.{Link, WikiPage}
 import org.apache.spark.graphx.Graph
+import org.apache.spark.sql.SparkSession
 
 private class ReciprocalPageRank extends CentralityMeasure {
   def getMapVector( originalGraph:Graph[WikiPage,Link], neighborhood: Set[Long] ):Map[String,Double]={
