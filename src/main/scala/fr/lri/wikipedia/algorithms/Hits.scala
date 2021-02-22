@@ -29,7 +29,7 @@ object Hits {
       VertexAttr(vInfo.srcId, if (message.authScore == 0.0) 1.0 else message.authScore , if (message.hubScore == 0.0) 1.0 else message.hubScore)
     }
 
-    val initialMessage: HitsMsg = null
+    val initialMessage: HitsMsg = HitsMsg(0.0,0.0)
 
     Pregel(hitsGraph, initialMessage, maxIterations = maxSteps, EdgeDirection.Both)(
     vprog = vertexProgram,
